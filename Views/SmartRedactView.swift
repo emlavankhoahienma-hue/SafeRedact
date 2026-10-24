@@ -222,15 +222,13 @@ public struct SmartRedactView: View {
                 let imageAspect = imgW / imgH
                 let containerAspect = containerWidth / max(containerHeight, 1)
                 
-                let renderWidth: CGFloat
-                let renderHeight: CGFloat
-                if imageAspect > containerAspect {
-                    renderWidth = containerWidth
-                    renderHeight = containerWidth / imageAspect
-                } else {
-                    renderHeight = containerHeight
-                    renderWidth = containerHeight * imageAspect
-                }
+                let (renderWidth, renderHeight): (CGFloat, CGFloat) = {
+                    if imageAspect > containerAspect {
+                        return (containerWidth, containerWidth / imageAspect)
+                    } else {
+                        return (containerHeight * imageAspect, containerHeight)
+                    }
+                }()
                 
                 let offsetX = (containerWidth - renderWidth) / 2
                 let offsetY = (containerHeight - renderHeight) / 2
