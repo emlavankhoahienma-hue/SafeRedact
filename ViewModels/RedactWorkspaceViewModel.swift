@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import SwiftUI
+import Vision
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
