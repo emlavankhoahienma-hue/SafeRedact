@@ -121,3 +121,8 @@ zip -qr SafeRedact-Unsigned.ipa Payload
 ## License
 
 MIT License. Copyright (c) 2026 ace4youblade.
+
+## Author
+**Ace4youblade (VanKhoa)**  
+Open-source software developer (born 2012) from Hai Phong, Vietnam.  
+GitHub: [@emlavankhoahienma-hue](https://github.com/emlavankhoahienma-hue)
