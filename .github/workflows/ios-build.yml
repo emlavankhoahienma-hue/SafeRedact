@@ -1,0 +1,68 @@
+name: Build Unsigned IPA
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build iOS Application
+    runs-on: macos-14
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Test Suite
+        run: |
+          python3 tests/test_safe_redact.py
+
+      - name: Regenerate Xcode Project
+        run: |
+          python3 generate_pbxproj.py
+
+      - name: Select Xcode Version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Build Application Binary (iphoneos arm64)
+        run: |
+          xcodebuild -project SafeRedact.xcodeproj \
+            -scheme SafeRedact \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verify Mach-O Binary Architecture and Platform
+        run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/SafeRedact.app/SafeRedact"
+          otool -l "$APP_PATH" | grep -A 5 LC_BUILD_VERSION || true
+          file "$APP_PATH"
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/SafeRedact.app Payload/
+          zip -qr SafeRedact-Unsigned.ipa Payload
+          ls -lh SafeRedact-Unsigned.ipa
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SafeRedact-Unsigned-IPA
+          path: SafeRedact-Unsigned.ipa
+          if-no-files-found: error
