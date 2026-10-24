@@ -71,7 +71,7 @@ public final class MetadataScrubberEngine {
             altitude: alt,
             cameraMake: make,
             cameraModel: model,
-            lens: lens,
+            lensModel: lens,
             dateTimeOriginal: dateOriginal,
             software: software,
             iso: iso,
@@ -100,7 +100,6 @@ public final class MetadataScrubberEngine {
         
         // Clean metadata dictionary with all tracking properties explicitly cleared
         let cleanProperties: [CFString: Any] = [
-            kCGImageDestinationLossless: true,
             kCGImagePropertyGPSDictionary: [:] as [CFString: Any],
             kCGImagePropertyExifDictionary: [:] as [CFString: Any],
             kCGImagePropertyTIFFDictionary: [:] as [CFString: Any],
