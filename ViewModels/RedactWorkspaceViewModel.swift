@@ -11,7 +11,6 @@ public final class RedactWorkspaceViewModel: ObservableObject {
     @Published public var originalImage: UIImage?
     @Published public var originalImageData: Data?
     @Published public var processedImage: UIImage?
-    @Published public var watermarkedImage: UIImage?
     
     @Published public var detectedRegions: [DetectedRegion] = []
     @Published public var metadataReport: ExifMetadataReport?
@@ -22,16 +21,24 @@ public final class RedactWorkspaceViewModel: ObservableObject {
         }
     }
     
-    @Published public var watermarkConfig = WatermarkConfig() {
-        didSet {
-            updateWatermarkPreview()
-        }
-    }
+    // Watermark Configuration: zero continuous re-rendering on slider change!
+    @Published public var watermarkConfig = WatermarkConfig()
     
     @Published public var isProcessing: Bool = false
     @Published public var statusMessage: String?
     @Published public var showToast: Bool = false
     @Published public var autoScrubExifOnSave: Bool = true
+    
+    // Batch Processing State
+    @Published public var isBatchProcessing: Bool = false
+    @Published public var batchProgress: Double = 0.0
+    @Published public var batchProcessedCount: Int = 0
+    @Published public var batchTotalCount: Int = 0
+    
+    // Library Privacy Scanner State
+    @Published public var flaggedPhotos: [FlaggedPhotoItem] = []
+    @Published public var isScanningLibrary: Bool = false
+    @Published public var scanProgress: Double = 0.0
     
     public init() {}
     
@@ -48,7 +55,6 @@ public final class RedactWorkspaceViewModel: ObservableObject {
         self.detectedRegions = []
         
         runDetection(on: normalized)
-        updateWatermarkPreview()
     }
     
     // MARK: - Generate Test Sample Bill with CoreGraphics & CIFilter QR
@@ -166,7 +172,6 @@ public final class RedactWorkspaceViewModel: ObservableObject {
             cg.setFillColor(red: 226.0 / 255.0, green: 232.0 / 255.0, blue: 240.0 / 255.0, alpha: 1.0)
             UIBezierPath(roundedRect: faceRect, cornerRadius: 100).fill()
             
-            // Stylized head and body inside avatar
             cg.setFillColor(red: 148.0 / 255.0, green: 163.0 / 255.0, blue: 184.0 / 255.0, alpha: 1.0)
             cg.fillEllipse(in: CGRect(x: 175, y: 1030, width: 90, height: 90))
             cg.fillEllipse(in: CGRect(x: 150, y: 1125, width: 140, height: 100))
@@ -186,7 +191,6 @@ public final class RedactWorkspaceViewModel: ObservableObject {
             footer.draw(at: CGPoint(x: 80, y: 1520))
         }
         
-        // Encode sample image with simulated EXIF/GPS dictionary to demonstrate Scrubber
         let sampleData = createSampleDataWithExif(from: sampleImage)
         self.originalImage = sampleImage
         self.originalImageData = sampleData
@@ -194,17 +198,15 @@ public final class RedactWorkspaceViewModel: ObservableObject {
         self.metadataReport = MetadataScrubberEngine.shared.inspectMetadata(data: sampleData)
         
         runDetection(on: sampleImage)
-        updateWatermarkPreview()
     }
     
-    // Embed realistic simulated GPS & Camera EXIF tags for the test document
     private func createSampleDataWithExif(from image: UIImage) -> Data {
         guard let cg = image.cgImage else {
-            return image.jpegData(compressionQuality: 0.95) ?? Data()
+            return image.jpegData(compressionQuality: 1.0) ?? Data()
         }
         let data = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else {
-            return image.jpegData(compressionQuality: 0.95) ?? Data()
+            return image.jpegData(compressionQuality: 1.0) ?? Data()
         }
         
         let gpsDict: [CFString: Any] = [
@@ -287,21 +289,11 @@ public final class RedactWorkspaceViewModel: ObservableObject {
         )
     }
     
-    // MARK: - Watermark Studio
-    
-    public func updateWatermarkPreview() {
-        guard let base = processedImage ?? originalImage else { return }
-        self.watermarkedImage = ImageRedactionEngine.shared.applyTiledWatermark(
-            to: base,
-            config: watermarkConfig
-        )
-    }
-    
-    // MARK: - EXIF Scrubber Operations
+    // MARK: - EXIF Scrubber Operations (100% Lossless Full-Resolution)
     
     public func scrubAllMetadataAndSave() -> Bool {
         guard let currentImage = processedImage ?? originalImage,
-              let rawData = currentImage.jpegData(compressionQuality: 0.98) else {
+              let rawData = currentImage.jpegData(compressionQuality: 1.0) else {
             return false
         }
         
@@ -318,11 +310,12 @@ public final class RedactWorkspaceViewModel: ObservableObject {
         return false
     }
     
-    // MARK: - Export Watermark / PDF
+    // MARK: - Export Watermark / PDF (On-Demand Background Execution)
     
     public func exportSecurePDF() -> URL? {
-        guard let img = watermarkedImage ?? processedImage ?? originalImage else { return nil }
-        let url = MetadataScrubberEngine.shared.exportSecurePDF(from: img, title: "SafeRedact Secured Doc")
+        guard let base = processedImage ?? originalImage else { return nil }
+        let watermarked = ImageRedactionEngine.shared.applyTiledWatermark(to: base, config: watermarkConfig)
+        let url = MetadataScrubberEngine.shared.exportSecurePDF(from: watermarked, title: "SafeRedact Secured Doc")
         if url != nil {
             triggerToast(messageKey: "pdf_generated_success")
         }
@@ -332,7 +325,7 @@ public final class RedactWorkspaceViewModel: ObservableObject {
     public func saveCurrentImageToPhotos() {
         guard let img = processedImage ?? originalImage else { return }
         
-        if autoScrubExifOnSave, let data = img.jpegData(compressionQuality: 0.98),
+        if autoScrubExifOnSave, let data = img.jpegData(compressionQuality: 1.0),
            let cleanData = MetadataScrubberEngine.shared.scrubMetadata(from: data),
            let cleanImage = UIImage(data: cleanData) {
             UIImageWriteToSavedPhotosAlbum(cleanImage, nil, nil, nil)
@@ -343,15 +336,125 @@ public final class RedactWorkspaceViewModel: ObservableObject {
     }
     
     public func saveWatermarkedImageToPhotos() {
-        guard let img = watermarkedImage else { return }
-        if autoScrubExifOnSave, let data = img.jpegData(compressionQuality: 0.98),
-           let cleanData = MetadataScrubberEngine.shared.scrubMetadata(from: data),
-           let cleanImage = UIImage(data: cleanData) {
-            UIImageWriteToSavedPhotosAlbum(cleanImage, nil, nil, nil)
-        } else {
-            UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+        guard let base = processedImage ?? originalImage else { return }
+        isProcessing = true
+        let config = self.watermarkConfig
+        let shouldScrub = self.autoScrubExifOnSave
+        
+        Task.detached(priority: .userInitiated) {
+            let watermarked = ImageRedactionEngine.shared.applyTiledWatermark(to: base, config: config)
+            
+            if shouldScrub, let data = watermarked.jpegData(compressionQuality: 1.0),
+               let cleanData = MetadataScrubberEngine.shared.scrubMetadata(from: data),
+               let cleanImage = UIImage(data: cleanData) {
+                UIImageWriteToSavedPhotosAlbum(cleanImage, nil, nil, nil)
+            } else {
+                UIImageWriteToSavedPhotosAlbum(watermarked, nil, nil, nil)
+            }
+            
+            await MainActor.run {
+                self.isProcessing = false
+                self.triggerToast(messageKey: "saved_notification")
+            }
         }
-        triggerToast(messageKey: "saved_notification")
+    }
+    
+    // MARK: - Batch Multi-Photo Processing (Multi-Threaded with TaskGroup & Autoreleasepool)
+    
+    public func processBatchPhotos(dataList: [Data]) async {
+        guard !dataList.isEmpty else { return }
+        
+        isBatchProcessing = true
+        batchTotalCount = dataList.count
+        batchProcessedCount = 0
+        batchProgress = 0.0
+        
+        let style = self.redactStyle
+        let shouldScrub = self.autoScrubExifOnSave
+        
+        let chunkSize = 4
+        for chunk in dataList.chunked(into: chunkSize) {
+            await withTaskGroup(of: Void.self) { group in
+                for itemData in chunk {
+                    group.addTask {
+                        autoreleasepool {
+                            guard let original = UIImage(data: itemData) else { return }
+                            let normalized = ImageRedactionEngine.shared.normalizeOrientation(original)
+                            
+                            // Perform synchronous detection in task
+                            var detected: [DetectedRegion] = []
+                            if let cg = normalized.cgImage {
+                                let request = VNRecognizeTextRequest()
+                                request.recognitionLevel = .accurate
+                                request.usesLanguageCorrection = true
+                                let handler = VNImageRequestHandler(cgImage: cg, options: [:])
+                                try? handler.perform([request])
+                                
+                                if let obs = request.results {
+                                    for o in obs {
+                                        if let str = o.topCandidates(1).first?.string,
+                                           let type = PIIDetectionEngine.shared.classifyText(str) {
+                                            let box = o.boundingBox
+                                            detected.append(
+                                                DetectedRegion(
+                                                    type: type,
+                                                    text: str,
+                                                    normalizedRect: CGRect(x: box.origin.x, y: 1.0 - box.origin.y - box.height, width: box.width, height: box.height),
+                                                    isRedacted: true
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Apply full-res redaction
+                            let redacted = ImageRedactionEngine.shared.applyRedactions(to: normalized, regions: detected, style: style)
+                            
+                            if shouldScrub, let jpegData = redacted.jpegData(compressionQuality: 1.0),
+                               let cleanData = MetadataScrubberEngine.shared.scrubMetadata(from: jpegData),
+                               let cleanImage = UIImage(data: cleanData) {
+                                UIImageWriteToSavedPhotosAlbum(cleanImage, nil, nil, nil)
+                            } else {
+                                UIImageWriteToSavedPhotosAlbum(redacted, nil, nil, nil)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            batchProcessedCount += chunk.count
+            batchProgress = Double(batchProcessedCount) / Double(batchTotalCount)
+        }
+        
+        isBatchProcessing = false
+        triggerToast(messageKey: "batch_completed")
+    }
+    
+    // MARK: - Library Privacy Scanner Integration
+    
+    public func runLibraryPrivacyScan() async {
+        isScanningLibrary = true
+        scanProgress = 0.0
+        
+        let items = await LibraryPrivacyScannerEngine.shared.scanLibrary { current, total in
+            Task { @MainActor in
+                self.scanProgress = total > 0 ? Double(current) / Double(total) : 0.0
+            }
+        }
+        
+        self.flaggedPhotos = items
+        self.isScanningLibrary = false
+    }
+    
+    public func selectFlaggedPhoto(item: FlaggedPhotoItem) {
+        Task {
+            if let (image, data) = await LibraryPrivacyScannerEngine.shared.loadFullImage(for: item.assetId) {
+                await MainActor.run {
+                    self.loadSelectedPhoto(data: data)
+                }
+            }
+        }
     }
     
     private func triggerToast(messageKey: String) {

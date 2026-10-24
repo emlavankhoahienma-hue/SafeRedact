@@ -20,6 +20,7 @@ class TestSafeRedact(unittest.TestCase):
             "Engines/PIIDetectionEngine.swift",
             "Engines/ImageRedactionEngine.swift",
             "Engines/MetadataScrubberEngine.swift",
+            "Engines/LibraryPrivacyScannerEngine.swift",
             "Services/LocalizationManager.swift",
             "ViewModels/RedactWorkspaceViewModel.swift",
             "Views/MainTabView.swift",
@@ -87,13 +88,15 @@ class TestSafeRedact(unittest.TestCase):
     def test_pii_classification_regex(self):
         # Test the regex patterns implemented in PIIDetectionEngine
         phone_regex = re.compile(r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}", re.IGNORECASE)
+        vn_phone_regex = re.compile(r"(?:(?:\+?84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9]|2\d{2}))[-.\s]?\d{3,4}[-.\s]?\d{3,4}", re.IGNORECASE)
         email_regex = re.compile(r"[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,64}", re.IGNORECASE)
         card_regex = re.compile(r"\b(?:\d[ -]*?){9,19}\b")
+        secret_regex = re.compile(r"(?i)(?:mat\s*khau|password|passcode|pin|cvv|cvc|api[_-]?key|secret)[:\s=]+([^\s,;]{3,32})")
         
         # Test phone
-        test_phones = ["0912 345 678", "0912345678", "+84 912 345 678", "024-3825-9999"]
+        test_phones = ["0912 345 678", "0912345678", "+84 912 345 678", "024-3825-9999", "0389123456", "0798765432"]
         for p in test_phones:
-            self.assertTrue(phone_regex.search(p), f"Should match phone: {p}")
+            self.assertTrue(phone_regex.search(p) or vn_phone_regex.search(p), f"Should match phone: {p}")
             
         # Test email
         test_emails = ["nguyen.an@safemail.vn", "contact@domain.com", "user.name+tag@sub.example.org"]
@@ -104,6 +107,11 @@ class TestSafeRedact(unittest.TestCase):
         test_cards = ["001098765432", "9876 5432 1098 7654", "1234-5678-9012-3456"]
         for c in test_cards:
             self.assertTrue(card_regex.search(c), f"Should match card/id: {c}")
+
+        # Test secrets / passwords / PINs
+        test_secrets = ["Password: SecurePass123", "mat khau: Abc@12345", "PIN: 9876", "CVV: 889"]
+        for s in test_secrets:
+            self.assertTrue(secret_regex.search(s), f"Should match secret: {s}")
 
     def test_metadata_scrubber_logic_simulation(self):
         # Simulate scrubbing: raw metadata dict -> sanitized dict
@@ -120,6 +128,15 @@ class TestSafeRedact(unittest.TestCase):
         self.assertNotIn("{TIFF}", sanitized)
         self.assertNotIn("{Exif}", sanitized)
         self.assertIn("ColorModel", sanitized)
+
+    def test_chunking_logic(self):
+        # Test multi-threaded chunking helper logic
+        items = list(range(23))
+        chunk_size = 4
+        chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
+        self.assertEqual(len(chunks), 6)
+        self.assertEqual(chunks[0], [0, 1, 2, 3])
+        self.assertEqual(chunks[-1], [20, 21, 22])
 
 if __name__ == "__main__":
     unittest.main()

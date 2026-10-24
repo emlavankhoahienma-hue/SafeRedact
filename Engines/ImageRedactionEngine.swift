@@ -9,24 +9,31 @@ public final class ImageRedactionEngine {
     private let ciContext: CIContext
     
     private init() {
-        self.ciContext = CIContext(options: [.useSoftwareRenderer: false])
+        self.ciContext = CIContext(options: [
+            .useSoftwareRenderer: false,
+            .priorityRequestLow: false
+        ])
     }
     
-    // Normalize image orientation to .up to prevent coordinate mismatch
+    // Normalize image orientation to .up at 100% native pixel resolution
     public func normalizeOrientation(_ image: UIImage) -> UIImage {
+        guard let cg = image.cgImage else { return image }
         if image.imageOrientation == .up {
             return image
         }
         
+        let pixelSize = CGSize(width: cg.width, height: cg.height)
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = image.scale
-        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        format.scale = 1.0
+        format.opaque = false
+        
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
         return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: image.size))
+            image.draw(in: CGRect(origin: .zero, size: pixelSize))
         }
     }
     
-    // Apply redactions with selected visual style
+    // Apply redactions preserving 100% lossless full-resolution pixels
     public func applyRedactions(
         to image: UIImage,
         regions: [DetectedRegion],
@@ -39,47 +46,71 @@ public final class ImageRedactionEngine {
             return normalizedImage
         }
         
-        let size = normalizedImage.size
+        guard let cg = normalizedImage.cgImage else { return normalizedImage }
+        let pixelWidth = CGFloat(cg.width)
+        let pixelHeight = CGFloat(cg.height)
+        let pixelSize = CGSize(width: pixelWidth, height: pixelHeight)
+        
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = normalizedImage.scale
+        format.scale = 1.0
+        format.opaque = false
         
         switch style {
         case .solid:
-            return applySolidRedaction(to: normalizedImage, regions: activeRegions, size: size, format: format)
+            return applySolidRedaction(
+                to: normalizedImage,
+                regions: activeRegions,
+                pixelSize: pixelSize,
+                format: format
+            )
         case .pixelate:
-            return applyCoreImageFilter(to: normalizedImage, regions: activeRegions, filterName: "CIPixellate", scaleParam: max(size.width, size.height) * 0.04)
+            let scaleParam = max(pixelWidth, pixelHeight) * 0.035
+            return applyCoreImageFilter(
+                to: normalizedImage,
+                regions: activeRegions,
+                filterName: "CIPixellate",
+                scaleParam: scaleParam,
+                pixelSize: pixelSize
+            )
         case .blur:
-            return applyCoreImageFilter(to: normalizedImage, regions: activeRegions, filterName: "CIGaussianBlur", scaleParam: max(size.width, size.height) * 0.035)
+            let scaleParam = max(pixelWidth, pixelHeight) * 0.03
+            return applyCoreImageFilter(
+                to: normalizedImage,
+                regions: activeRegions,
+                filterName: "CIGaussianBlur",
+                scaleParam: scaleParam,
+                pixelSize: pixelSize
+            )
         }
     }
     
     private func applySolidRedaction(
         to image: UIImage,
         regions: [DetectedRegion],
-        size: CGSize,
+        pixelSize: CGSize,
         format: UIGraphicsImageRendererFormat
     ) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
         return renderer.image { context in
-            image.draw(in: CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: pixelSize))
             
             let cg = context.cgContext
             cg.setFillColor(red: 11.0 / 255.0, green: 14.0 / 255.0, blue: 20.0 / 255.0, alpha: 1.0) // #0B0E14
             
             for region in regions {
                 let rect = CGRect(
-                    x: region.normalizedRect.origin.x * size.width,
-                    y: region.normalizedRect.origin.y * size.height,
-                    width: region.normalizedRect.width * size.width,
-                    height: region.normalizedRect.height * size.height
+                    x: region.normalizedRect.origin.x * pixelSize.width,
+                    y: region.normalizedRect.origin.y * pixelSize.height,
+                    width: region.normalizedRect.width * pixelSize.width,
+                    height: region.normalizedRect.height * pixelSize.height
                 )
-                let insetRect = rect.insetBy(dx: -2, dy: -2)
-                let path = UIBezierPath(roundedRect: insetRect, cornerRadius: 4)
+                let insetRect = rect.insetBy(dx: -4, dy: -4)
+                let path = UIBezierPath(roundedRect: insetRect, cornerRadius: 8)
                 path.fill()
                 
-                // Add a subtle border
+                // Solid border highlight
                 cg.setStrokeColor(red: 34.0 / 255.0, green: 41.0 / 255.0, blue: 56.0 / 255.0, alpha: 1.0)
-                cg.setLineWidth(1.0)
+                cg.setLineWidth(2.0)
                 path.stroke()
             }
         }
@@ -89,7 +120,8 @@ public final class ImageRedactionEngine {
         to image: UIImage,
         regions: [DetectedRegion],
         filterName: String,
-        scaleParam: CGFloat
+        scaleParam: CGFloat,
+        pixelSize: CGSize
     ) -> UIImage {
         guard let cgImage = image.cgImage else { return image }
         let ciImage = CIImage(cgImage: cgImage)
@@ -107,63 +139,68 @@ public final class ImageRedactionEngine {
             filter = blur
         }
         
-        guard let filteredCI = filter?.outputImage else { return image }
-        
-        // Render filtered image
-        guard let filteredCG = ciContext.createCGImage(filteredCI, from: ciImage.extent) else {
+        guard let filteredCI = filter?.outputImage,
+              let filteredCG = ciContext.createCGImage(filteredCI, from: ciImage.extent) else {
             return image
         }
-        let filteredImage = UIImage(cgImage: filteredCG, scale: image.scale, orientation: .up)
         
-        // Composite filtered regions over original
-        let size = image.size
+        let filteredImage = UIImage(cgImage: filteredCG, scale: 1.0, orientation: .up)
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = image.scale
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        format.scale = 1.0
+        format.opaque = false
         
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
         return renderer.image { context in
-            image.draw(in: CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: pixelSize))
             
             let cg = context.cgContext
             for region in regions {
                 let rect = CGRect(
-                    x: region.normalizedRect.origin.x * size.width,
-                    y: region.normalizedRect.origin.y * size.height,
-                    width: region.normalizedRect.width * size.width,
-                    height: region.normalizedRect.height * size.height
+                    x: region.normalizedRect.origin.x * pixelSize.width,
+                    y: region.normalizedRect.origin.y * pixelSize.height,
+                    width: region.normalizedRect.width * pixelSize.width,
+                    height: region.normalizedRect.height * pixelSize.height
                 )
-                let expanded = rect.insetBy(dx: -2, dy: -2)
+                let expanded = rect.insetBy(dx: -4, dy: -4)
                 
                 cg.saveGState()
-                let clipPath = UIBezierPath(roundedRect: expanded, cornerRadius: 4).cgPath
+                let clipPath = UIBezierPath(roundedRect: expanded, cornerRadius: 8).cgPath
                 cg.addPath(clipPath)
                 cg.clip()
-                filteredImage.draw(in: CGRect(origin: .zero, size: size))
+                filteredImage.draw(in: CGRect(origin: .zero, size: pixelSize))
                 cg.restoreGState()
                 
                 // Border highlight
-                cg.setStrokeColor(red: 16.0 / 255.0, green: 185.0 / 255.0, blue: 129.0 / 255.0, alpha: 0.6)
-                cg.setLineWidth(1.5)
-                UIBezierPath(roundedRect: expanded, cornerRadius: 4).stroke()
+                cg.setStrokeColor(red: 16.0 / 255.0, green: 185.0 / 255.0, blue: 129.0 / 255.0, alpha: 0.8)
+                cg.setLineWidth(2.5)
+                UIBezierPath(roundedRect: expanded, cornerRadius: 8).stroke()
             }
         }
     }
     
-    // Apply repeating diagonal security watermark across the image
+    // Apply repeating diagonal security watermark across full-resolution image
     public func applyTiledWatermark(to image: UIImage, config: WatermarkConfig) -> UIImage {
         let normalized = normalizeOrientation(image)
-        let size = normalized.size
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = normalized.scale
+        guard let cg = normalized.cgImage else { return normalized }
         
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let pixelSize = CGSize(width: cg.width, height: cg.height)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1.0
+        format.opaque = false
+        
+        // Scale font size proportionally for high-resolution images
+        let scaleFactor = max(pixelSize.width, pixelSize.height) / 1200.0
+        let effectiveFontSize = max(14.0, config.fontSize * scaleFactor)
+        let effectiveSpacing = max(80.0, config.spacing * scaleFactor)
+        
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
         return renderer.image { context in
-            normalized.draw(in: CGRect(origin: .zero, size: size))
+            normalized.draw(in: CGRect(origin: .zero, size: pixelSize))
             
-            let cg = context.cgContext
-            cg.saveGState()
+            let cgContext = context.cgContext
+            cgContext.saveGState()
             
-            let font = UIFont.monospacedSystemFont(ofSize: config.fontSize, weight: .bold)
+            let font = UIFont.monospacedSystemFont(ofSize: effectiveFontSize, weight: .bold)
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: UIColor.white.withAlphaComponent(config.opacity)
@@ -172,16 +209,16 @@ public final class ImageRedactionEngine {
             let textSize = attrString.size()
             
             let radians = config.angleDegrees * .pi / 180.0
-            let stepX = max(textSize.width + 40, config.spacing)
-            let stepY = max(textSize.height + 40, config.spacing * 0.7)
+            let stepX = max(textSize.width + 40 * scaleFactor, effectiveSpacing)
+            let stepY = max(textSize.height + 30 * scaleFactor, effectiveSpacing * 0.7)
             
-            let diagonal = sqrt(size.width * size.width + size.height * size.height)
+            let diagonal = sqrt(pixelSize.width * pixelSize.width + pixelSize.height * pixelSize.height)
             let start = -diagonal
             let end = diagonal * 2
             
-            cg.translateBy(x: size.width * 0.5, y: size.height * 0.5)
-            cg.rotate(by: CGFloat(radians))
-            cg.translateBy(x: -size.width * 0.5, y: -size.height * 0.5)
+            cgContext.translateBy(x: pixelSize.width * 0.5, y: pixelSize.height * 0.5)
+            cgContext.rotate(by: CGFloat(radians))
+            cgContext.translateBy(x: -pixelSize.width * 0.5, y: -pixelSize.height * 0.5)
             
             var y = start
             while y < end {
@@ -193,7 +230,7 @@ public final class ImageRedactionEngine {
                 y += stepY
             }
             
-            cg.restoreGState()
+            cgContext.restoreGState()
         }
     }
 }

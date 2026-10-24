@@ -18,6 +18,7 @@ def main():
         ("Engines/PIIDetectionEngine.swift", "PIIDetectionEngine.swift"),
         ("Engines/ImageRedactionEngine.swift", "ImageRedactionEngine.swift"),
         ("Engines/MetadataScrubberEngine.swift", "MetadataScrubberEngine.swift"),
+        ("Engines/LibraryPrivacyScannerEngine.swift", "LibraryPrivacyScannerEngine.swift"),
         ("Services/LocalizationManager.swift", "LocalizationManager.swift"),
         ("ViewModels/RedactWorkspaceViewModel.swift", "RedactWorkspaceViewModel.swift"),
         ("Views/MainTabView.swift", "MainTabView.swift"),

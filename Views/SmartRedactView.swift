@@ -5,8 +5,9 @@ public struct SmartRedactView: View {
     @ObservedObject var vm = RedactWorkspaceViewModel.shared
     @ObservedObject var loc = LocalizationManager.shared
     
-    @State private var selectedItem: PhotosPickerItem?
+    @State private var selectedItems: [PhotosPickerItem] = []
     @State private var showShareSheet: Bool = false
+    @State private var showScannerSheet: Bool = false
     
     public init() {}
     
@@ -27,6 +28,11 @@ public struct SmartRedactView: View {
                                 .foregroundColor(AppTheme.border),
                             alignment: .bottom
                         )
+                    
+                    // Batch Processing Banner
+                    if vm.isBatchProcessing {
+                        batchProgressBanner
+                    }
                     
                     // Main Content Canvas
                     ScrollView {
@@ -72,14 +78,38 @@ public struct SmartRedactView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(AppTheme.surface, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .onChange(of: selectedItem) { newItem in
-                Task {
-                    if let data = try? await newItem?.loadTransferable(type: Data.self) {
-                        await MainActor.run {
-                            vm.loadSelectedPhoto(data: data)
-                        }
+            .sheet(isPresented: $showScannerSheet) {
+                LibraryScannerSheetView(vm: vm, loc: loc)
+            }
+            .onChange(of: selectedItems) { newItems in
+                handleSelectedItems(newItems)
+            }
+        }
+    }
+    
+    // MARK: - Handle Single or Batch Photo Pick
+    
+    private func handleSelectedItems(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        
+        if items.count == 1 {
+            Task {
+                if let data = try? await items.first?.loadTransferable(type: Data.self) {
+                    await MainActor.run {
+                        vm.loadSelectedPhoto(data: data)
                     }
                 }
+            }
+        } else {
+            // Batch Multi-Photo Processing (Multi-threaded TaskGroup)
+            Task {
+                var dataList: [Data] = []
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        dataList.append(data)
+                    }
+                }
+                await vm.processBatchPhotos(dataList: dataList)
             }
         }
     }
@@ -88,7 +118,7 @@ public struct SmartRedactView: View {
     
     private var topActionBar: some View {
         HStack(spacing: AppTheme.Spacing.sm) {
-            PhotosPicker(selection: $selectedItem, matching: .images) {
+            PhotosPicker(selection: $selectedItems, maxSelectionCount: 30, matching: .images) {
                 HStack(spacing: AppTheme.Spacing.xs) {
                     VectorIcon(.camera, size: 16, color: AppTheme.textPrimary)
                     Text(vm.originalImage == nil ? loc.t("select_from_library") : loc.t("change_photo"))
@@ -100,6 +130,22 @@ public struct SmartRedactView: View {
                 .background(AppTheme.surfaceElevated)
                 .cornerRadius(AppTheme.Radius.sm)
                 .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.sm).stroke(AppTheme.border, lineWidth: 1))
+            }
+            
+            Button {
+                showScannerSheet = true
+            } label: {
+                HStack(spacing: AppTheme.Spacing.xs) {
+                    VectorIcon(.crosshairScan, size: 16, color: AppTheme.primaryAccent)
+                    Text(loc.t("scan_library_btn"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(AppTheme.primaryAccent)
+                }
+                .padding(.horizontal, AppTheme.Spacing.sm)
+                .padding(.vertical, 8)
+                .background(AppTheme.surfaceElevated)
+                .cornerRadius(AppTheme.Radius.sm)
+                .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.sm).stroke(AppTheme.primaryAccent.opacity(0.4), lineWidth: 1))
             }
             
             Spacer()
@@ -121,7 +167,30 @@ public struct SmartRedactView: View {
         }
     }
     
-    // MARK: - Interactive Image Viewer with Bounding Boxes
+    // MARK: - Batch Progress Banner
+    
+    private var batchProgressBanner: some View {
+        VStack(spacing: 6) {
+            HStack {
+                VectorIcon(.sliders, size: 16, color: AppTheme.primaryAccent)
+                Text("\(loc.t("batch_progress")): \(vm.batchProcessedCount)/\(vm.batchTotalCount)")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(AppTheme.textPrimary)
+                Spacer()
+                Text(String(format: "%.0f%%", vm.batchProgress * 100))
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(AppTheme.primaryAccent)
+            }
+            ProgressView(value: vm.batchProgress)
+                .tint(AppTheme.primaryAccent)
+        }
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.vertical, AppTheme.Spacing.sm)
+        .background(AppTheme.surfaceElevated)
+        .overlay(Rectangle().frame(height: 1).foregroundColor(AppTheme.border), alignment: .bottom)
+    }
+    
+    // MARK: - Interactive Image Viewer with Tap to Toggle/Unredact
     
     private func imageViewerWithBoxes(image: UIImage) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
@@ -155,31 +224,46 @@ public struct SmartRedactView: View {
                         .cornerRadius(AppTheme.Radius.md)
                         .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.md).stroke(AppTheme.border, lineWidth: 1))
                     
-                    // Render interactive bounding boxes
+                    // Interactive Bounding Boxes: Tap to Toggle Redact / Unredact
                     ForEach(vm.detectedRegions) { region in
                         let boxX = region.normalizedRect.origin.x * renderWidth
                         let boxY = region.normalizedRect.origin.y * renderHeight
-                        let boxW = region.normalizedRect.width * renderWidth
-                        let boxH = region.normalizedRect.height * renderHeight
+                        let boxW = max(region.normalizedRect.width * renderWidth, 24)
+                        let boxH = max(region.normalizedRect.height * renderHeight, 18)
                         
                         Button {
                             vm.toggleRegion(id: region.id)
                         } label: {
-                            ZStack(alignment: .topTrailing) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(region.isRedacted ? AppTheme.primaryAccent : AppTheme.danger, lineWidth: 2)
-                                    .background(
-                                        (region.isRedacted ? AppTheme.primaryAccent : AppTheme.danger)
-                                            .opacity(region.isRedacted ? 0.2 : 0.05)
-                                    )
+                            ZStack(alignment: .topLeading) {
+                                if region.isRedacted {
+                                    // Redacted State: Solid / Blurred frame
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(region.type.badgeColor.opacity(0.25))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .stroke(region.type.badgeColor, lineWidth: 2)
+                                        )
+                                } else {
+                                    // Unredacted State: Dashed border outline
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(
+                                            Color.white.opacity(0.8),
+                                            style: StrokeStyle(lineWidth: 1.5, dash: [4])
+                                        )
+                                        .background(Color.black.opacity(0.1))
+                                }
                                 
-                                // Mini status indicator
-                                Circle()
-                                    .fill(region.isRedacted ? AppTheme.primaryAccent : AppTheme.danger)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: -2, y: 2)
+                                // Mini Badge
+                                Text(region.type.rawValue.uppercased())
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                    .padding(.horizontal, 3)
+                                    .padding(.vertical, 1)
+                                    .background(region.isRedacted ? region.type.badgeColor : Color.gray.opacity(0.8))
+                                    .foregroundColor(Color.white)
+                                    .cornerRadius(2)
+                                    .offset(x: 2, y: -8)
                             }
-                            .frame(width: max(boxW, 20), height: max(boxH, 16))
+                            .frame(width: boxW, height: boxH)
                         }
                         .offset(x: boxX, y: boxY)
                     }
@@ -244,7 +328,7 @@ public struct SmartRedactView: View {
                 }
             }
             
-            // Action Buttons: Save & Share
+            // Action Buttons: Save & Share (100% Full-Resolution)
             HStack(spacing: AppTheme.Spacing.sm) {
                 Button {
                     vm.saveCurrentImageToPhotos()
@@ -317,7 +401,7 @@ public struct SmartRedactView: View {
                     .cornerRadius(AppTheme.Radius.md)
                 }
                 
-                PhotosPicker(selection: $selectedItem, matching: .images) {
+                PhotosPicker(selection: $selectedItems, maxSelectionCount: 30, matching: .images) {
                     HStack(spacing: 8) {
                         VectorIcon(.camera, size: 18, color: AppTheme.textPrimary)
                         Text(loc.t("select_from_library"))
@@ -330,6 +414,22 @@ public struct SmartRedactView: View {
                     .cornerRadius(AppTheme.Radius.md)
                     .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.md).stroke(AppTheme.border, lineWidth: 1))
                 }
+                
+                Button {
+                    showScannerSheet = true
+                } label: {
+                    HStack(spacing: 8) {
+                        VectorIcon(.crosshairScan, size: 18, color: AppTheme.primaryCobalt)
+                        Text(loc.t("scan_library_btn"))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(AppTheme.primaryCobalt)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(AppTheme.surfaceElevated)
+                    .cornerRadius(AppTheme.Radius.md)
+                    .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.md).stroke(AppTheme.primaryCobalt.opacity(0.4), lineWidth: 1))
+                }
             }
             .padding(.top, AppTheme.Spacing.sm)
         }
@@ -337,5 +437,115 @@ public struct SmartRedactView: View {
         .background(AppTheme.surface)
         .cornerRadius(AppTheme.Radius.lg)
         .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.lg).stroke(AppTheme.border, lineWidth: 1))
+    }
+}
+
+// MARK: - Library Scanner Sheet View
+
+public struct LibraryScannerSheetView: View {
+    @ObservedObject var vm: RedactWorkspaceViewModel
+    @ObservedObject var loc: LocalizationManager
+    @Environment(\.dismiss) private var dismiss
+    
+    public var body: some View {
+        NavigationStack {
+            ZStack {
+                AppTheme.background.ignoresSafeArea()
+                
+                VStack(spacing: AppTheme.Spacing.md) {
+                    if vm.isScanningLibrary {
+                        VStack(spacing: 12) {
+                            ProgressView(value: vm.scanProgress)
+                                .tint(AppTheme.primaryAccent)
+                            Text(loc.t("scan_in_progress"))
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(AppTheme.textSecondary)
+                        }
+                        .padding(AppTheme.Spacing.xl)
+                    } else if vm.flaggedPhotos.isEmpty {
+                        VStack(spacing: AppTheme.Spacing.md) {
+                            VectorIcon(.shield, size: 48, color: AppTheme.primaryAccent)
+                            Text(loc.t("safe_library_notice"))
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(AppTheme.textPrimary)
+                            Button {
+                                Task {
+                                    await vm.runLibraryPrivacyScan()
+                                }
+                            } label: {
+                                Text(loc.t("scan_library_btn"))
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(Color.white)
+                                    .padding(.horizontal, AppTheme.Spacing.lg)
+                                    .padding(.vertical, 12)
+                                    .background(AppTheme.primaryAccent)
+                                    .cornerRadius(AppTheme.Radius.sm)
+                            }
+                        }
+                        .padding(AppTheme.Spacing.xl)
+                    } else {
+                        List {
+                            ForEach(vm.flaggedPhotos) { item in
+                                Button {
+                                    vm.selectFlaggedPhoto(item: item)
+                                    dismiss()
+                                } label: {
+                                    HStack(spacing: AppTheme.Spacing.sm) {
+                                        VectorIcon(iconForCategory(item.category), size: 20, color: colorForCategory(item.category))
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.title)
+                                                .font(.system(size: 14, weight: .bold))
+                                                .foregroundColor(AppTheme.textPrimary)
+                                            Text(item.subtitle)
+                                                .font(.system(size: 12))
+                                                .foregroundColor(AppTheme.textSecondary)
+                                        }
+                                        Spacer()
+                                        VectorIcon(.download, size: 14, color: AppTheme.textSecondary)
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                                .listRowBackground(AppTheme.surface)
+                            }
+                        }
+                        .scrollContentBackground(.hidden)
+                    }
+                }
+                .padding(.top, AppTheme.Spacing.md)
+            }
+            .navigationTitle(loc.t("scan_library_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(AppTheme.surface, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                    .foregroundColor(AppTheme.textSecondary)
+                }
+            }
+            .task {
+                if vm.flaggedPhotos.isEmpty && !vm.isScanningLibrary {
+                    await vm.runLibraryPrivacyScan()
+                }
+            }
+        }
+    }
+    
+    private func iconForCategory(_ category: FlaggedCategory) -> VectorIcon.IconKind {
+        switch category {
+        case .documentCard: return .fileLock
+        case .personalPII: return .qrCode
+        case .gpsLeak: return .crosshairScan
+        }
+    }
+    
+    private func colorForCategory(_ category: FlaggedCategory) -> Color {
+        switch category {
+        case .documentCard: return AppTheme.warning
+        case .personalPII: return AppTheme.danger
+        case .gpsLeak: return AppTheme.primaryAccent
+        }
     }
 }

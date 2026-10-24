@@ -7,9 +7,15 @@ public final class PIIDetectionEngine {
     
     private init() {}
     
-    // Regular expressions for critical privacy patterns
+    // Regular expressions for privacy patterns
     private let phoneRegex = try? NSRegularExpression(
         pattern: #"(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}"#,
+        options: .caseInsensitive
+    )
+    
+    // Vietnam phone numbers: 09x, 08x, 07x, 03x, 05x, +84...
+    private let vnPhoneRegex = try? NSRegularExpression(
+        pattern: #"(?:(?:\+?84|0)(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9]|2\d{2}))[-.\s]?\d{3,4}[-.\s]?\d{3,4}"#,
         options: .caseInsensitive
     )
     
@@ -18,10 +24,16 @@ public final class PIIDetectionEngine {
         options: .caseInsensitive
     )
     
-    // 9-19 digits with optional spaces or dashes (Bank accounts, Vietnamese CCCD 12 digits, Credit/Debit cards)
+    // 9-19 digits (Bank accounts, Vietnamese CCCD 12 digits, CMND 9 digits, Credit/Debit cards 16 digits)
     private let cardOrIdRegex = try? NSRegularExpression(
         pattern: #"\b(?:\d[ -]*?){9,19}\b"#,
         options: []
+    )
+    
+    // Passwords, PINs, CVV, Secret tokens
+    private let secretRegex = try? NSRegularExpression(
+        pattern: #"(?i)(?:mat\s*khau|password|passcode|pin|cvv|cvc|api[_-]?key|secret)[:\s=]+([^\s,;]{3,32})"#,
+        options: .caseInsensitive
     )
     
     public func detectSensitiveData(in image: UIImage) async -> [DetectedRegion] {
@@ -29,22 +41,26 @@ public final class PIIDetectionEngine {
         
         var regions: [DetectedRegion] = []
         
-        // 1. Detect Text with VNRecognizeTextRequest
+        // 1. Vision Text Recognition (Accurate + Language Correction + vi-VN & en-US)
         let textRegions = await detectTextRegions(in: cgImage)
         regions.append(contentsOf: textRegions)
         
-        // 2. Detect Faces with VNDetectFaceRectanglesRequest
+        // 2. Vision Face Detection
         let faceRegions = await detectFaceRegions(in: cgImage)
         regions.append(contentsOf: faceRegions)
         
-        // 3. Detect Barcodes & QR codes with VNDetectBarcodesRequest
+        // 3. Vision Barcode / QR Detection
         let barcodeRegions = await detectBarcodeRegions(in: cgImage)
         regions.append(contentsOf: barcodeRegions)
+        
+        // 4. Vision Document & ID Card Segmentation
+        let docRegions = await detectDocumentRegions(in: cgImage)
+        regions.append(contentsOf: docRegions)
         
         return regions
     }
     
-    // MARK: - Vision Text Recognition
+    // MARK: - Vision Accurate Text Recognition
     
     private func detectTextRegions(in cgImage: CGImage) async -> [DetectedRegion] {
         await withCheckedContinuation { continuation in
@@ -60,8 +76,6 @@ public final class PIIDetectionEngine {
                     guard let topCandidate = observation.topCandidates(1).first else { continue }
                     let string = topCandidate.string
                     
-                    // Convert bounding box from Vision coordinates (origin bottom-left)
-                    // to SwiftUI coordinates (origin top-left)
                     let visionBox = observation.boundingBox
                     let uiRect = CGRect(
                         x: visionBox.origin.x,
@@ -70,7 +84,6 @@ public final class PIIDetectionEngine {
                         height: visionBox.height
                     )
                     
-                    // Match against PII Patterns
                     if let type = self.classifyText(string) {
                         detected.append(
                             DetectedRegion(
@@ -82,11 +95,12 @@ public final class PIIDetectionEngine {
                         )
                     }
                 }
-                
                 continuation.resume(returning: detected)
             }
             
             request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            request.recognitionLanguages = ["vi-VN", "en-US"]
             request.usesCPUOnly = false
             
             let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
@@ -179,6 +193,49 @@ public final class PIIDetectionEngine {
         }
     }
     
+    // MARK: - Vision Document Segmentation
+    
+    private func detectDocumentRegions(in cgImage: CGImage) async -> [DetectedRegion] {
+        await withCheckedContinuation { continuation in
+            let request = VNDetectDocumentSegmentationRequest { request, error in
+                guard error == nil, let observations = request.results as? [VNRectangleObservation] else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                
+                var detected: [DetectedRegion] = []
+                for doc in observations {
+                    let box = doc.boundingBox
+                    // Only flag if document occupies a substantial sub-region (e.g. ID card inside photo)
+                    if box.width < 0.95 || box.height < 0.95 {
+                        let uiRect = CGRect(
+                            x: box.origin.x,
+                            y: 1.0 - box.origin.y - box.height,
+                            width: box.width,
+                            height: box.height
+                        )
+                        detected.append(
+                            DetectedRegion(
+                                type: .document,
+                                text: "Document Bounds",
+                                normalizedRect: uiRect,
+                                isRedacted: false // Default to unredacted boundary so user can choose
+                            )
+                        )
+                    }
+                }
+                continuation.resume(returning: detected)
+            }
+            
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            do {
+                try handler.perform([request])
+            } catch {
+                continuation.resume(returning: [])
+            }
+        }
+    }
+    
     // MARK: - Pattern Classification
     
     public func classifyText(_ text: String) -> PIIType? {
@@ -187,12 +244,22 @@ public final class PIIDetectionEngine {
         
         let range = NSRange(location: 0, length: trimmed.utf16.count)
         
-        // 1. Email check
+        // 1. Password / Secret check
+        if let secretRegex = secretRegex, secretRegex.firstMatch(in: trimmed, options: [], range: range) != nil {
+            return .secret
+        }
+        
+        // 2. Email check
         if let emailRegex = emailRegex, emailRegex.firstMatch(in: trimmed, options: [], range: range) != nil {
             return .email
         }
         
-        // 2. Phone check via Regex
+        // 3. Vietnam Phone check
+        if let vnPhoneRegex = vnPhoneRegex, vnPhoneRegex.firstMatch(in: trimmed, options: [], range: range) != nil {
+            return .phone
+        }
+        
+        // 4. General Phone check
         if let phoneRegex = phoneRegex, phoneRegex.firstMatch(in: trimmed, options: [], range: range) != nil {
             let digitsOnly = trimmed.filter { $0.isNumber }
             if digitsOnly.count >= 9 && digitsOnly.count <= 13 {
@@ -200,7 +267,7 @@ public final class PIIDetectionEngine {
             }
         }
         
-        // 3. Card / Account / Citizen ID check
+        // 5. Card / Account / Citizen ID check
         if let cardRegex = cardOrIdRegex, cardRegex.firstMatch(in: trimmed, options: [], range: range) != nil {
             let digitsOnly = trimmed.filter { $0.isNumber }
             if digitsOnly.count >= 9 && digitsOnly.count <= 19 {
@@ -208,7 +275,7 @@ public final class PIIDetectionEngine {
             }
         }
         
-        // 4. NSDataDetector fallback for phone or address
+        // 6. NSDataDetector fallback for phone or address
         if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.phoneNumber.rawValue | NSTextCheckingResult.CheckingType.address.rawValue) {
             let matches = detector.matches(in: trimmed, options: [], range: range)
             for match in matches {

@@ -1,4 +1,5 @@
 import SwiftUI
+import Photos
 
 // MARK: - Sensitive Data Types
 
@@ -9,6 +10,8 @@ public enum PIIType: String, CaseIterable, Identifiable, Codable {
     case address
     case face
     case barcode
+    case secret
+    case document
     case custom
     
     public var id: String { rawValue }
@@ -27,6 +30,10 @@ public enum PIIType: String, CaseIterable, Identifiable, Codable {
             return Color(hex: "#10B981") // Emerald
         case .barcode:
             return Color(hex: "#06B6D4") // Cyan
+        case .secret:
+            return Color(hex: "#F43F5E") // Rose Red
+        case .document:
+            return Color(hex: "#6366F1") // Indigo
         case .custom:
             return Color(hex: "#EC4899") // Pink
         }
@@ -141,5 +148,63 @@ public struct WatermarkConfig: Equatable {
         self.angleDegrees = angleDegrees
         self.fontSize = fontSize
         self.spacing = spacing
+    }
+}
+
+// MARK: - Batch Processing Models
+
+public struct BatchItem: Identifiable, Equatable {
+    public let id: String
+    public let thumbnail: UIImage?
+    public var status: BatchStatus
+    public var regionsCount: Int
+    
+    public enum BatchStatus: Equatable {
+        case queued
+        case processing
+        case completed
+        case failed(String)
+    }
+    
+    public init(id: String = UUID().uuidString, thumbnail: UIImage? = nil, status: BatchStatus = .queued, regionsCount: Int = 0) {
+        self.id = id
+        self.thumbnail = thumbnail
+        self.status = status
+        self.regionsCount = regionsCount
+    }
+}
+
+// MARK: - Library Privacy Scanner Models
+
+public enum FlaggedCategory: String, CaseIterable, Identifiable {
+    case documentCard
+    case personalPII
+    case gpsLeak
+    
+    public var id: String { rawValue }
+}
+
+public struct FlaggedPhotoItem: Identifiable, Equatable {
+    public let id: String
+    public let assetId: String
+    public let category: FlaggedCategory
+    public let title: String
+    public let subtitle: String
+    public let creationDate: Date?
+    
+    public init(
+        id: String = UUID().uuidString,
+        assetId: String,
+        category: FlaggedCategory,
+        title: String,
+        subtitle: String,
+        creationDate: Date? = nil
+    ) {
+        self.id = id
+        self.assetId = assetId
+        self.category = category
+        self.title = title
+        self.subtitle = subtitle
+        self.creationDate = creationDate
     }
 }

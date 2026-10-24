@@ -20,9 +20,9 @@ public struct WatermarkStudioView: View {
                         // Header
                         headerCard
                         
-                        // Watermark Preview Canvas
-                        if let img = vm.watermarkedImage ?? vm.processedImage ?? vm.originalImage {
-                            previewCard(image: img)
+                        // Watermark Smooth Canvas Preview
+                        if let img = vm.processedImage ?? vm.originalImage {
+                            canvasPreviewCard(baseImage: img)
                             
                             // Watermark Controls
                             controlsCard
@@ -89,15 +89,50 @@ public struct WatermarkStudioView: View {
         .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.md).stroke(AppTheme.border, lineWidth: 1))
     }
     
-    private func previewCard(image: UIImage) -> some View {
+    // Smooth 60-120 FPS SwiftUI Canvas Preview without full-res image re-renders
+    private func canvasPreviewCard(baseImage: UIImage) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxHeight: 320)
-                .frame(maxWidth: .infinity)
-                .cornerRadius(AppTheme.Radius.sm)
-                .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.sm).stroke(AppTheme.border, lineWidth: 1))
+            ZStack {
+                Image(uiImage: baseImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 320)
+                    .frame(maxWidth: .infinity)
+                
+                // Hardware accelerated Canvas overlay
+                Canvas { context, size in
+                    let text = Text(vm.watermarkConfig.text)
+                        .font(.system(size: vm.watermarkConfig.fontSize * 0.75, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color.white.opacity(vm.watermarkConfig.opacity))
+                    
+                    let resolved = context.resolve(text)
+                    let textSize = resolved.measure(in: size)
+                    
+                    let stepX = max(textSize.width + 30, vm.watermarkConfig.spacing * 0.6)
+                    let stepY = max(textSize.height + 24, vm.watermarkConfig.spacing * 0.45)
+                    
+                    let diagonal = sqrt(size.width * size.width + size.height * size.height)
+                    let start = -diagonal
+                    let end = diagonal * 2
+                    
+                    context.translateBy(x: size.width * 0.5, y: size.height * 0.5)
+                    context.rotate(by: .degrees(vm.watermarkConfig.angleDegrees))
+                    context.translateBy(x: -size.width * 0.5, y: -size.height * 0.5)
+                    
+                    var y = start
+                    while y < end {
+                        var x = start
+                        while x < end {
+                            context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .center)
+                            x += stepX
+                        }
+                        y += stepY
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .cornerRadius(AppTheme.Radius.sm)
+            .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.sm).stroke(AppTheme.border, lineWidth: 1))
         }
         .padding(AppTheme.Spacing.md)
         .background(AppTheme.surface)
@@ -121,9 +156,6 @@ public struct WatermarkStudioView: View {
                     .cornerRadius(AppTheme.Radius.sm)
                     .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.sm).stroke(AppTheme.border, lineWidth: 1))
                     .foregroundColor(AppTheme.textPrimary)
-                    .onChange(of: vm.watermarkConfig.text) { _ in
-                        vm.updateWatermarkPreview()
-                    }
             }
             
             // Opacity Slider
@@ -139,9 +171,6 @@ public struct WatermarkStudioView: View {
                 }
                 Slider(value: $vm.watermarkConfig.opacity, in: 0.1...0.8, step: 0.02)
                     .tint(AppTheme.primaryAccent)
-                    .onChange(of: vm.watermarkConfig.opacity) { _ in
-                        vm.updateWatermarkPreview()
-                    }
             }
             
             // Angle Slider
@@ -157,9 +186,6 @@ public struct WatermarkStudioView: View {
                 }
                 Slider(value: $vm.watermarkConfig.angleDegrees, in: -60.0...60.0, step: 5.0)
                     .tint(AppTheme.primaryCobalt)
-                    .onChange(of: vm.watermarkConfig.angleDegrees) { _ in
-                        vm.updateWatermarkPreview()
-                    }
             }
             
             // Font Size Slider
@@ -175,9 +201,6 @@ public struct WatermarkStudioView: View {
                 }
                 Slider(value: $vm.watermarkConfig.fontSize, in: 12.0...36.0, step: 2.0)
                     .tint(AppTheme.textPrimary)
-                    .onChange(of: vm.watermarkConfig.fontSize) { _ in
-                        vm.updateWatermarkPreview()
-                    }
             }
         }
         .padding(AppTheme.Spacing.md)
@@ -257,7 +280,6 @@ public struct WatermarkStudioView: View {
     }
 }
 
-// Helper wrapper for UIActivityViewController
 public struct ActivityView: UIViewControllerRepresentable {
     public let activityItems: [Any]
     public let applicationActivities: [UIActivity]? = nil

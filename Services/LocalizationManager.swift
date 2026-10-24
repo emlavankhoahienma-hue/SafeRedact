@@ -49,19 +49,30 @@ public final class LocalizationManager: ObservableObject {
             "smart_redact_subtitle": "Tự nhận diện SĐT, CCCD, Email, QR, Mặt & che ngay trên máy",
             "load_sample_bill": "Nạp Ảnh Mẫu Thử Nghiệm",
             "select_from_library": "Chọn Ảnh Từ Thư Viện",
+            "select_multiple": "Chọn Nhiều Ảnh",
             "change_photo": "Đổi Ảnh",
             "detected_regions": "Vùng Nhạy Cảm Phát Hiện",
-            "tap_hint": "Chạm trực tiếp vào từng ô trên ảnh để Bật/Tắt che",
+            "tap_hint": "Chạm vào ô đang che để Mở, chạm ô viền đứt để Che lại",
             "redact_all": "Che Tất Cả",
             "unredact_all": "Bỏ Che Tất Cả",
             "style_pixelate": "Vỡ Hạt Mosaic",
             "style_blur": "Làm Mờ Kính",
             "style_solid": "Thanh Che Kín",
-            "save_image": "Lưu Vào Ảnh",
+            "save_image": "Lưu Vào Ảnh (Gốc 100%)",
             "share_image": "Chia Sẻ Ảnh",
             "no_image_loaded": "Chưa có ảnh nào được chọn",
             "no_image_hint": "Bấm 'Nạp Ảnh Mẫu' hoặc chọn ảnh từ thư viện để bắt đầu",
             "scanning_pii": "Đang quét dữ liệu nhạy cảm bằng Vision AI...",
+            "batch_processing": "Xử Lý Hàng Loạt",
+            "batch_progress": "Tiến độ xử lý",
+            "batch_completed": "Đã xử lý xong toàn bộ ảnh",
+            "scan_library_title": "Quét Thư Viện Tìm Ảnh Rò Rỉ",
+            "scan_library_btn": "Quét Thư Viện Bảo Mật",
+            "scan_in_progress": "Đang quét thư viện...",
+            "flagged_documents": "Giấy tờ, CCCD & Hóa đơn",
+            "flagged_pii": "Mã QR, SĐT & Thông tin",
+            "flagged_gps": "Ảnh lộ tọa độ định vị GPS",
+            "safe_library_notice": "Không phát hiện ảnh có nguy cơ rò rỉ",
             
             // PII Types
             "pii_phone": "Số điện thoại",
@@ -70,12 +81,14 @@ public final class LocalizationManager: ObservableObject {
             "pii_address": "Địa chỉ",
             "pii_face": "Khuôn mặt",
             "pii_barcode": "Mã QR / Barcode",
+            "pii_secret": "Mật khẩu / PIN",
+            "pii_document": "Vùng giấy tờ",
             "pii_custom": "Tự chọn",
             
             // EXIF Scrubber View
             "exif_title": "Soi & Xóa Dữ Liệu Ẩn",
             "exif_subtitle": "Bảo vệ thông tin định vị GPS, thiết bị và dấu vết chụp",
-            "scrub_action": "Xóa Sạch EXIF & Lưu Bản Sạch",
+            "scrub_action": "Xóa Sạch EXIF & Lưu Bản Gốc 100%",
             "gps_location": "Tọa Độ Định Vị GPS",
             "no_gps_leaks": "Không phát hiện dữ liệu GPS trong ảnh",
             "latitude": "Vĩ độ",
@@ -96,13 +109,13 @@ public final class LocalizationManager: ObservableObject {
             
             // Watermark View
             "watermark_title": "Đóng Dấu Bảo Vệ Giấy Tờ",
-            "watermark_subtitle": "Phủ lớp chữ chéo chống sao chép và xuất file PDF bảo mật",
+            "watermark_subtitle": "Xem trước tức thì không giật lag & xuất file PDF bảo mật",
             "watermark_text": "Nội Dung Dấu Bảo Vệ",
             "opacity": "Độ Mờ Lớp Phủ",
             "angle": "Góc Nghiêng",
             "font_size": "Cỡ Chữ",
             "export_pdf": "Xuất File PDF",
-            "save_watermarked": "Lưu Ảnh Đã Đóng Dấu",
+            "save_watermarked": "Lưu Ảnh Đã Đóng Dấu (Gốc 100%)",
             "pdf_generated_success": "Đã tạo tài liệu PDF bảo mật thành công",
             
             // Settings View
@@ -117,7 +130,7 @@ public final class LocalizationManager: ObservableObject {
             "developer_label": "Nhà phát triển",
             "privacy_architecture": "Kiến Trúc Bảo Mật",
             "zero_cloud_guarantee": "100% On-Device Neural Vision - Không gửi bất kỳ dữ liệu nào lên mạng",
-            "saved_notification": "Đã lưu ảnh thành công vào Thư viện"
+            "saved_notification": "Đã lưu ảnh chất lượng gốc thành công vào Thư viện"
         ],
         .en: [
             // Tabs
@@ -131,19 +144,30 @@ public final class LocalizationManager: ObservableObject {
             "smart_redact_subtitle": "Detect phone, ID cards, email, QR, faces and redact fully on-device",
             "load_sample_bill": "Load Sample Invoice",
             "select_from_library": "Choose From Photo Library",
+            "select_multiple": "Select Multiple Photos",
             "change_photo": "Change Photo",
             "detected_regions": "Detected Sensitive Regions",
-            "tap_hint": "Tap directly on any bounding box to toggle redact",
+            "tap_hint": "Tap redacted box to reveal, tap dashed box to re-redact",
             "redact_all": "Redact All",
             "unredact_all": "Unredact All",
             "style_pixelate": "Pixelate Mosaic",
             "style_blur": "Glass Blur",
             "style_solid": "Solid Bar",
-            "save_image": "Save to Photos",
+            "save_image": "Save to Photos (100% Lossless)",
             "share_image": "Share Image",
             "no_image_loaded": "No Image Selected",
             "no_image_hint": "Tap 'Load Sample Invoice' or pick an image from library to begin",
             "scanning_pii": "Scanning sensitive data with Vision AI...",
+            "batch_processing": "Batch Processing",
+            "batch_progress": "Processing progress",
+            "batch_completed": "Completed batch processing",
+            "scan_library_title": "Scan Photo Library for Leaks",
+            "scan_library_btn": "Scan Privacy Risks",
+            "scan_in_progress": "Scanning library...",
+            "flagged_documents": "ID Cards, Passports & Bills",
+            "flagged_pii": "QR Codes, Phones & Secrets",
+            "flagged_gps": "Photos with Leaked GPS Coordinates",
+            "safe_library_notice": "No privacy risk photos detected",
             
             // PII Types
             "pii_phone": "Phone Number",
@@ -152,12 +176,14 @@ public final class LocalizationManager: ObservableObject {
             "pii_address": "Physical Address",
             "pii_face": "Human Face",
             "pii_barcode": "QR / Barcode",
+            "pii_secret": "Password / PIN",
+            "pii_document": "Document Bounds",
             "pii_custom": "Custom Region",
             
             // EXIF Scrubber View
             "exif_title": "Inspect & Scrub Hidden Data",
             "exif_subtitle": "Safeguard GPS geolocation, device fingerprints, and metadata tags",
-            "scrub_action": "Scrub All Metadata & Save Clean Copy",
+            "scrub_action": "Scrub All Metadata & Save Clean (100% Lossless)",
             "gps_location": "GPS Geolocation Coordinates",
             "no_gps_leaks": "No GPS metadata found in this photo",
             "latitude": "Latitude",
@@ -178,13 +204,13 @@ public final class LocalizationManager: ObservableObject {
             
             // Watermark View
             "watermark_title": "ID & Document Watermark",
-            "watermark_subtitle": "Overlay diagonal security watermark and export secured PDF",
+            "watermark_subtitle": "Instant 60-120 FPS live preview & secured PDF export",
             "watermark_text": "Watermark Text Content",
             "opacity": "Watermark Opacity",
             "angle": "Rotation Angle",
             "font_size": "Font Size",
             "export_pdf": "Export PDF Document",
-            "save_watermarked": "Save Watermarked Photo",
+            "save_watermarked": "Save Watermarked Photo (100% Lossless)",
             "pdf_generated_success": "Secured PDF document generated successfully",
             
             // Settings View
@@ -199,7 +225,7 @@ public final class LocalizationManager: ObservableObject {
             "developer_label": "Developer",
             "privacy_architecture": "Privacy Architecture",
             "zero_cloud_guarantee": "100% On-Device Neural Vision - Zero network transmission",
-            "saved_notification": "Photo saved successfully to Library"
+            "saved_notification": "Photo saved at original quality to Library"
         ]
     ]
 }
