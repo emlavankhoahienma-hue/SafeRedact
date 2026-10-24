@@ -117,16 +117,18 @@ public struct SmartRedactView: View {
     // MARK: - Top Action Bar
     
     private var topActionBar: some View {
-        HStack(spacing: AppTheme.Spacing.sm) {
+        HStack(spacing: AppTheme.Spacing.xs) {
             PhotosPicker(selection: $selectedItems, maxSelectionCount: 30, matching: .images) {
-                HStack(spacing: AppTheme.Spacing.xs) {
-                    VectorIcon(.camera, size: 16, color: AppTheme.textPrimary)
-                    Text(vm.originalImage == nil ? loc.t("select_from_library") : loc.t("change_photo"))
-                        .font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 4) {
+                    VectorIcon(.camera, size: 14, color: AppTheme.textPrimary)
+                    Text(vm.originalImage == nil ? loc.t("select_from_library") : loc.t("change_photo_short"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundColor(AppTheme.textPrimary)
                 }
-                .padding(.horizontal, AppTheme.Spacing.sm)
-                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
                 .background(AppTheme.surfaceElevated)
                 .cornerRadius(AppTheme.Radius.sm)
                 .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.sm).stroke(AppTheme.border, lineWidth: 1))
@@ -135,32 +137,34 @@ public struct SmartRedactView: View {
             Button {
                 showScannerSheet = true
             } label: {
-                HStack(spacing: AppTheme.Spacing.xs) {
-                    VectorIcon(.crosshairScan, size: 16, color: AppTheme.primaryAccent)
-                    Text(loc.t("scan_library_btn"))
-                        .font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 4) {
+                    VectorIcon(.crosshairScan, size: 14, color: AppTheme.primaryAccent)
+                    Text(loc.t("scan_library_short"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundColor(AppTheme.primaryAccent)
                 }
-                .padding(.horizontal, AppTheme.Spacing.sm)
-                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
                 .background(AppTheme.surfaceElevated)
                 .cornerRadius(AppTheme.Radius.sm)
                 .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.sm).stroke(AppTheme.primaryAccent.opacity(0.4), lineWidth: 1))
             }
             
-            Spacer()
-            
             Button {
                 vm.loadSampleBill()
             } label: {
-                HStack(spacing: AppTheme.Spacing.xs) {
-                    VectorIcon(.sparkles, size: 16, color: Color.white)
-                    Text(loc.t("load_sample_bill"))
-                        .font(.system(size: 13, weight: .bold))
+                HStack(spacing: 4) {
+                    VectorIcon(.sparkles, size: 14, color: Color.white)
+                    Text(loc.t("load_sample_short"))
+                        .font(.system(size: 12, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundColor(Color.white)
                 }
-                .padding(.horizontal, AppTheme.Spacing.sm)
-                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
                 .background(AppTheme.primaryCobalt)
                 .cornerRadius(AppTheme.Radius.sm)
             }
@@ -211,23 +215,41 @@ public struct SmartRedactView: View {
                 .padding(.bottom, 4)
             
             GeometryReader { geo in
-                let imageSize = image.size
-                let aspect = imageSize.width / max(imageSize.height, 1)
-                let renderWidth = geo.size.width
-                let renderHeight = renderWidth / aspect
+                let containerWidth = geo.size.width
+                let containerHeight = geo.size.height
+                let imgW = max(image.size.width, 1)
+                let imgH = max(image.size.height, 1)
+                let imageAspect = imgW / imgH
+                let containerAspect = containerWidth / max(containerHeight, 1)
+                
+                let renderWidth: CGFloat
+                let renderHeight: CGFloat
+                if imageAspect > containerAspect {
+                    renderWidth = containerWidth
+                    renderHeight = containerWidth / imageAspect
+                } else {
+                    renderHeight = containerHeight
+                    renderWidth = containerHeight * imageAspect
+                }
+                
+                let offsetX = (containerWidth - renderWidth) / 2
+                let offsetY = (containerHeight - renderHeight) / 2
                 
                 ZStack(alignment: .topLeading) {
+                    Color.clear
+                        .frame(width: containerWidth, height: containerHeight)
+                    
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .frame(width: renderWidth, height: renderHeight)
                         .cornerRadius(AppTheme.Radius.md)
-                        .overlay(RoundedRectangle(cornerRadius: AppTheme.Radius.md).stroke(AppTheme.border, lineWidth: 1))
+                        .offset(x: offsetX, y: offsetY)
                     
                     // Interactive Bounding Boxes: Tap to Toggle Redact / Unredact
                     ForEach(vm.detectedRegions) { region in
-                        let boxX = region.normalizedRect.origin.x * renderWidth
-                        let boxY = region.normalizedRect.origin.y * renderHeight
+                        let boxX = offsetX + region.normalizedRect.origin.x * renderWidth
+                        let boxY = offsetY + region.normalizedRect.origin.y * renderHeight
                         let boxW = max(region.normalizedRect.width * renderWidth, 24)
                         let boxH = max(region.normalizedRect.height * renderHeight, 18)
                         

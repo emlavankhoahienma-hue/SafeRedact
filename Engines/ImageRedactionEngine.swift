@@ -15,21 +15,19 @@ public final class ImageRedactionEngine {
         ])
     }
     
-    // Normalize image orientation to .up at 100% native pixel resolution
+    // Normalize image orientation to .up at 100% native pixel resolution without any distortion
     public func normalizeOrientation(_ image: UIImage) -> UIImage {
-        guard let cg = image.cgImage else { return image }
-        if image.imageOrientation == .up {
-            return image
-        }
+        guard image.imageOrientation != .up else { return image }
         
-        let pixelSize = CGSize(width: cg.width, height: cg.height)
+        // image.size already has correct width and height for rotated orientations (.right, .left, etc.)
+        let targetSize = image.size
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1.0
+        format.scale = image.scale
         format.opaque = false
         
-        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
         return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: pixelSize))
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
     }
     
@@ -46,13 +44,9 @@ public final class ImageRedactionEngine {
             return normalizedImage
         }
         
-        guard let cg = normalizedImage.cgImage else { return normalizedImage }
-        let pixelWidth = CGFloat(cg.width)
-        let pixelHeight = CGFloat(cg.height)
-        let pixelSize = CGSize(width: pixelWidth, height: pixelHeight)
-        
+        let pixelSize = normalizedImage.size
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1.0
+        format.scale = normalizedImage.scale
         format.opaque = false
         
         switch style {
@@ -64,7 +58,7 @@ public final class ImageRedactionEngine {
                 format: format
             )
         case .pixelate:
-            let scaleParam = max(pixelWidth, pixelHeight) * 0.035
+            let scaleParam = max(pixelSize.width, pixelSize.height) * 0.035
             return applyCoreImageFilter(
                 to: normalizedImage,
                 regions: activeRegions,
@@ -73,7 +67,7 @@ public final class ImageRedactionEngine {
                 pixelSize: pixelSize
             )
         case .blur:
-            let scaleParam = max(pixelWidth, pixelHeight) * 0.03
+            let scaleParam = max(pixelSize.width, pixelSize.height) * 0.03
             return applyCoreImageFilter(
                 to: normalizedImage,
                 regions: activeRegions,
@@ -181,11 +175,9 @@ public final class ImageRedactionEngine {
     // Apply repeating diagonal security watermark across full-resolution image
     public func applyTiledWatermark(to image: UIImage, config: WatermarkConfig) -> UIImage {
         let normalized = normalizeOrientation(image)
-        guard let cg = normalized.cgImage else { return normalized }
-        
-        let pixelSize = CGSize(width: cg.width, height: cg.height)
+        let pixelSize = normalized.size
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1.0
+        format.scale = normalized.scale
         format.opaque = false
         
         // Scale font size proportionally for high-resolution images
